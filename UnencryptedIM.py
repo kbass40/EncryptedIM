@@ -40,6 +40,7 @@ def server():
     socket_list = [server_socket]
     print(f"Chat server started on port {portNumber}")
     client_socket, addr = server_socket.accept()
+    print(f"Chat server connected")
 
     while True:
         socket_list = [sys.stdin, client_socket]
