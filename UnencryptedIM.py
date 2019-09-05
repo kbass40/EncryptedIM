@@ -39,7 +39,10 @@ def server():
     while True:
         socket_list = [sys.stdin, client_socket]
         # wait for IO
-        read, write, error = select.select(socket_list, [], [])
+        try:
+            read, write, error = select.select(socket_list, [], [])
+        except KeyboardInterrupt as error:
+            sys.exit(0)
         for sock in read:
             # recieve message
             if sock == client_socket:
@@ -49,7 +52,10 @@ def server():
                     msg = client_socket.recv(512)
                     # new message determine the length from the header
                     if newMessage:
-                        length = int(msg[:HEADERSIZE])
+                        try:
+                            length = int(msg[:HEADERSIZE])
+                        except ValueError as error:
+                            sys.exit(0)
                         newMessage = False
                     # append message to needed for large messages
                     message += msg.decode("utf-8")
@@ -63,7 +69,10 @@ def server():
             # send message
             else:
                 # read from standard input
-                msg = input()
+                try:
+                    msg = input()
+                except EOFError as error:
+                    sys.exit(0)
                 # attach header to message
                 msg = f"{len(msg):<{HEADERSIZE}}" + msg
                 # send message
@@ -77,7 +86,10 @@ def client():
 
     while True:
         socket_list = [sys.stdin, client_socket]
-        read, write, error = select.select(socket_list, [], [])
+        try:
+            read, write, error = select.select(socket_list, [], [])
+        except KeyboardInterrupt as error:
+            sys.exit(0)
         for sock in read:
             if sock == client_socket:
                 message = ""
@@ -85,7 +97,10 @@ def client():
                 while True:
                     msg = client_socket.recv(512)
                     if newMessage:
-                        length = int(msg[:HEADERSIZE])
+                        try:
+                            length = int(msg[:HEADERSIZE])
+                        except ValueError as error:
+                            sys.exit(0)
                         newMessage = False
                     message += msg.decode("utf-8")
                     if len(message) - HEADERSIZE == length:
@@ -94,7 +109,10 @@ def client():
                         message = ""
                         break
             else:
-                msg = input()
+                try:
+                    msg = input()
+                except EOFError as error:
+                    sys.exit(0)
                 msg = f"{len(msg):<{HEADERSIZE}}" + msg
                 client_socket.send(bytes(msg, "utf-8"))
     client_socket.close()
