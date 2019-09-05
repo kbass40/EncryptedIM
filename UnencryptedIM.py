@@ -26,21 +26,13 @@ elif sys.argv[1] == "-c":
 else:
     invalidArguments("invalid arguments")
 
-
-print("hostname: " + socket.gethostname())
-print("argument: " + str(serv))
-print("hostname: " + hostname)
-print("port number: " + str(portNumber))
-
 def server():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_socket.bind((hostname, portNumber))
     server_socket.listen()
     socket_list = [server_socket]
-    print(f"Chat server started on port {portNumber}")
     client_socket, addr = server_socket.accept()
-    print(f"Chat server connected")
 
     while True:
         socket_list = [sys.stdin, client_socket]
