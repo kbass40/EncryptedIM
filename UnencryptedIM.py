@@ -6,7 +6,6 @@ HEADERSIZE = 256
 
 portNumber = 9999
 serv = False
-hostname = socket.gethostname()
 
 def invalidArguments(message):
     print(message)
@@ -30,7 +29,7 @@ def server():
     # create socket
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server_socket.bind((hostname, portNumber))
+    server_socket.bind((socket.gethostname(), portNumber))
     # listen for incoming connections
     server_socket.listen()
     socket_list = [server_socket]
