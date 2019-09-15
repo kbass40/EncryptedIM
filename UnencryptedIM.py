@@ -4,7 +4,8 @@ import select
 import argparse
 import Crypto.Random
 from Crypto.Cipher import AES
-import hashlib 
+import hashlib
+import hmac
 
 HEADERSIZE = 256
 
@@ -33,23 +34,27 @@ def init():
         server()
 
 def generage_iv():
-    rnd = Crypto.Random.get_random_bytes(128)
+    rnd = Crypto.Random.get_random_bytes(16)
     return rnd
 
 def hash_key(key):
-    hkey = hashlib.sha256(key.encode())
-    print(hkey)
-    print(hkey.digest())
+    hkey = hashlib.sha256(key)
     return hkey
 
 def add_pad(msg):
-    length = 16 - (len(msg) % 16)
-    msg += bytes([length]) * 16
+    msg += b"\0" * (16 - (len(msg) % 16))
     return msg
 
 def remove_pad(msg):
-    msg = msg[:-msg[-1]]
-    return msg
+    return msg.rstrip(b"\0")
+
+def encrypt_message(msg, key, iv):
+    encryptor = AES.new(key, AES.MODE_CBC, iv)
+    return iv + encryptor.encrypt(msg)
+
+def create_hmac(encrypted_message, key):
+    auth_msg = hmac.new(key, encrypted_message, hashlib.sha256)
+    return auth_msg
 
 def server():
     # create socket
@@ -147,13 +152,18 @@ def client():
 
 def main():
     IV = generage_iv()
-    # key1 = hash_key("this is a key")
-    # key2 = hash_key("fnlsdhfsldkfjlksdjflksenfilnsdlijflwiejfilwjefliwejfliwejlifjwelifjwelijffffffffffffffffffffffffffffffffffffffffljiljlijliwejililililililililililililililillifjwhliffsdfsjdfn")
-    # print(key1.hexdigest())
-    # print(key2.hexdigest())
+    key1 = hash_key("this is a key".encode())
+    key2 = hash_key("fnlsdhfsldkfjlksdjflklililililililililililililillifjwhliffsdfsjdfn".encode())
+    print(len(key1.hexdigest()))
+    print(len(key2.hexdigest()))
     msg = add_pad("hello world".encode())
     print(msg)
     print(remove_pad(msg))
+    secret_message = add_pad("secret message".encode())
+    encrypted_message = encrypt_message(secret_message, key1.digest(), IV)
+    print(f"encrypted message: {encrypted_message}")
+    auth_msg = create_hmac(encrypted_message, "this is my auth key".encode())
+    print(f"authentication message: {auth_msg.digest()}")
     init()
 
 if __name__ == "__main__":
