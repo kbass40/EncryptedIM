@@ -105,28 +105,35 @@ def init():
         server_s.close()
         logger.debug("Connection received from " + str(remote_addr))
 
+# generate random initialization vector
 def generate_iv():
     rnd = Crypto.Random.get_random_bytes(16)
     return rnd
 
+# hash key to get uniform size
 def hash_key(key):
     hkey = hashlib.sha256(key)
     return hkey
 
+#pad your message so that is a variable length of 16 bytes
 def add_pad(msg):
     msg += b"\0" * (16 - (len(msg) % 16))
     return msg
 
+# remove the pad to read the message
 def remove_pad(msg):
     return msg.rstrip(b"\0")
 
+# AES encryption
 def encrypt_message(msg, key):
     iv = generate_iv()
     padded_message = add_pad(msg)
     hashed_key = hash_key(key).digest()
     encryptor = AES.new(hashed_key, AES.MODE_CBC, iv)
+    # concatanate your iv to encrypted message so that you can use the iv in decryption
     return iv + encryptor.encrypt(padded_message)
 
+# AES decryption
 def decrypt_message(encrypted_msg, key):
     iv = encrypted_msg[:16]
     hashed_key = hash_key(key).digest()
@@ -135,6 +142,7 @@ def decrypt_message(encrypted_msg, key):
     plaintext_message = remove_pad(padded_message)
     return plaintext_message
 
+# create hmac for authentication
 def create_hmac(encrypted_message, key):
     auth_msg = hmac.new(key, encrypted_message, hashlib.sha256)
     return auth_msg.digest()
