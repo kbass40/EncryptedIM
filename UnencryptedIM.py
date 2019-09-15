@@ -1,29 +1,55 @@
 import sys
 import socket
 import select
+import argparse
+import Crypto.Random
+from Crypto.Cipher import AES
+import hashlib 
 
 HEADERSIZE = 256
 
 portNumber = 9999
-serv = False
+hostname = ""
 
-def invalidArguments(message):
-    print(message)
-    sys.exit(0)
+def parse_arguments():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-s', dest = 'server', action = 'store_true')
+    parser.add_argument('-c', dest = 'connect', metavar = 'HOSTNAME', type = str)
+    parser.add_argument(dest = 'port', metavar = 'PORT', nargs = '?', type = int, default = portNumber)
+    parser.add_argument('-confkey', dest = 'conf', type = str)
+    parser.add_argument('-authkey', dest = 'auth', type = str)
+    return parser.parse_args()
 
-if len(sys.argv) < 2:
-    invalidArguments("not enough arguments")
-elif sys.argv[1] == "-s":
-    serv = True
-    if len(sys.argv) > 2:
-        portNumber = int(sys.argv[2])
-elif sys.argv[1] == "-c":
-    serv = False
-    hostname = sys.argv[2]
-    if len(sys.argv) > 3:
-        portNumber = int(sys.argv[3])
-else:
-    invalidArguments("invalid arguments")
+def init():
+    args = parse_arguments()
+    global portNumber
+    global hostname
+    if args.connect is not None:     
+        portNumber = args.port
+        hostname = args.connect
+        client()
+    if args.server is not False:
+        portNumber = args.port
+        server()
+
+def generage_iv():
+    rnd = Crypto.Random.get_random_bytes(128)
+    return rnd
+
+def hash_key(key):
+    hkey = hashlib.sha256(key.encode())
+    print(hkey)
+    print(hkey.digest())
+    return hkey
+
+def add_pad(msg):
+    length = 16 - (len(msg) % 16)
+    msg += bytes([length]) * 16
+    return msg
+
+def remove_pad(msg):
+    msg = msg[:-msg[-1]]
+    return msg
 
 def server():
     # create socket
@@ -33,7 +59,10 @@ def server():
     # listen for incoming connections
     server_socket.listen()
     socket_list = [server_socket]
-    client_socket, addr = server_socket.accept()
+    try:
+        client_socket, addr = server_socket.accept()
+    except KeyboardInterrupt as error:
+        sys.exit(0)
 
     while True:
         socket_list = [sys.stdin, client_socket]
@@ -116,7 +145,16 @@ def client():
                 client_socket.send(bytes(msg, "utf-8"))
     client_socket.close()
 
-if serv:
-    server()
-else:
-    client()
+def main():
+    IV = generage_iv()
+    # key1 = hash_key("this is a key")
+    # key2 = hash_key("fnlsdhfsldkfjlksdjflksenfilnsdlijflwiejfilwjefliwejfliwejlifjwelifjwelijffffffffffffffffffffffffffffffffffffffffljiljlijliwejililililililililililililililillifjwhliffsdfsjdfn")
+    # print(key1.hexdigest())
+    # print(key2.hexdigest())
+    msg = add_pad("hello world".encode())
+    print(msg)
+    print(remove_pad(msg))
+    init()
+
+if __name__ == "__main__":
+    main()
