@@ -1,6 +1,7 @@
-# UnencryptedIM
+# EnncryptedIM
 
 Simple Unencrypted IM service built using python3.
+Updated to add encryption.
 
 # How to run:
 
