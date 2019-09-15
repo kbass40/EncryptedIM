@@ -1,45 +1,109 @@
+#!/usr/bin/python
+
+# UnencryptedIM provided by Professor Kevin Butler and written by Henry Tan
+# I have added encryption to the unencrypted messeneger provided
+
+import os
 import sys
+import argparse
 import socket
 import select
-import argparse
+import logging
+import signal #To kill the programs nicely
+import random
 import Crypto.Random
 from Crypto.Cipher import AES
 import hashlib
 import hmac
 
-HEADERSIZE = 256
+from collections import deque
 
-portNumber = 9999
-hostname = ""
+############
+#GLOBAL VARS
+DEFAULT_PORT = 9999
+s = None
+server_s = None
 confkey = ""
 authkey = ""
+logger = logging.getLogger('main')
+###########
+
 
 def parse_arguments():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-s', dest = 'server', action = 'store_true')
-    parser.add_argument('-c', dest = 'connect', metavar = 'HOSTNAME', type = str)
-    parser.add_argument(dest = 'port', metavar = 'PORT', nargs = '?', type = int, default = portNumber)
+    parser = argparse.ArgumentParser(description = 'A P2P IM service.')
+    parser.add_argument('-c', dest='connect', metavar='HOSTNAME', type=str,
+        help = 'Host to connect to')
+    parser.add_argument('-s', dest='server', action='store_true',
+        help = 'Run as server (on port 9999)')
+    parser.add_argument('-p', dest='port', metavar='PORT', type=int, 
+        default = DEFAULT_PORT,
+        help = 'For testing purposes - allows use of different port')
     parser.add_argument('-confkey', dest = 'conf', type = str)
     parser.add_argument('-authkey', dest = 'auth', type = str)
+
+
     return parser.parse_args()
 
+def print_how_to():
+    print("This program must be run with exactly ONE of the following options")
+    print("-c <HOSTNAME>  : to connect to <HOSTNAME> on tcp port 9999")
+    print("-s             : to run a server listening on tcp port 9999")
+    print("-confkey       : key used for encryption")
+    print("-authkey       : key used for hmac authentication")
+
+def sigint_handler(signal, frame):
+    logger.debug("SIGINT Captured! Killing")
+    global s, server_s
+    if s is not None:
+        s.shutdown(socket.SHUT_RDWR)
+        s.close()
+    if server_s is not None:
+        s.close()
+
+    quit()
+
 def init():
+    global s, authkey, confkey
     args = parse_arguments()
-    global portNumber
-    global hostname
-    global confkey
-    global authkey
-    if args.conf is None or args.auth is None:
-        sys.exit()
+
+    logging.basicConfig()
+    logger.setLevel(logging.CRITICAL)
+    
+    #Catch the kill signal to close the socket gracefully
+    signal.signal(signal.SIGINT, sigint_handler)
+
+    if args.conf is None:
+        print_how_to()
+        quit()
+    
+    if args.auth is None:
+        print_how_to()
+        quit()
+
+    if args.connect is None and args.server is False:
+        print_how_to()
+        quit()
+
+    if args.connect is not None and args.server is not False:
+        print_how_to()
+        quit() 
+
     confkey = args.conf
     authkey = args.auth
-    if args.connect is not None:     
-        portNumber = args.port
-        hostname = args.connect
-        client()
+
+    if args.connect is not None:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        logger.debug('Connecting to ' + args.connect + ' ' + str(args.port))
+        s.connect((args.connect, args.port))
+
     if args.server is not False:
-        portNumber = args.port
-        server()
+        global server_s
+        server_s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_s.bind(('', args.port))
+        server_s.listen(1) #Only one connection at a time
+        s, remote_addr = server_s.accept()
+        server_s.close()
+        logger.debug("Connection received from " + str(remote_addr))
 
 def generate_iv():
     rnd = Crypto.Random.get_random_bytes(16)
@@ -75,136 +139,72 @@ def create_hmac(encrypted_message, key):
     auth_msg = hmac.new(key, encrypted_message, hashlib.sha256)
     return auth_msg.digest()
 
-def server():
-    # create socket
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server_socket.bind((socket.gethostname(), portNumber))
-    # listen for incoming connections
-    server_socket.listen()
-    socket_list = [server_socket]
-    try:
-        client_socket, addr = server_socket.accept()
-    except KeyboardInterrupt as error:
-        sys.exit(0)
-
-    while True:
-        socket_list = [sys.stdin, client_socket]
-        # wait for IO
-        try:
-            read, write, error = select.select(socket_list, [], [])
-        except KeyboardInterrupt as error:
-            sys.exit(0)
-        for sock in read:
-            # recieve message
-            if sock == client_socket:
-                # message = ""
-                # newMessage = True
-                while True:
-                    msg = client_socket.recv(1024)
-                    if msg is not None and msg != b'':
-                        recv_hmac = msg[:32]
-                        recv_encrypted_msg = msg[32:]
-                        if recv_hmac == create_hmac(recv_encrypted_msg, authkey.encode()):
-                            recv_decrypted_msg = decrypt_message(msg[32:], confkey.encode())
-                            print(recv_decrypted_msg.decode())
-                            break
-                        else:
-                            print("message has been tampered with")
-                            sys.exit(0)
-                    else:
-                        sys.exit(0)
-                    # # new message determine the length from the header
-                    # if newMessage:
-                    #     try:
-                    #         length = int(msg[:HEADERSIZE])
-                    #     except ValueError as error:
-                    #         sys.exit(0)
-                    #     newMessage = False
-                    # # append message to needed for large messages
-                    # message += msg.decode("utf-8")
-                    # # print message once the entire message has been recieved
-                    # if len(message) - HEADERSIZE == length:
-                    #     print(message[HEADERSIZE:])
-                    #     # reset values and break loop
-                    #     newMessage = True
-                    #     message = ""
-                    #     break
-            # send message
-            else:
-                # read from standard input
-                try:
-                    msg = input()
-                except EOFError as error:
-                    sys.exit(0)
-                # encrypt message and generate auth msg
-                encrypted_message = encrypt_message(msg.encode(), confkey.encode())
-                hmac_message = create_hmac(encrypted_message, authkey.encode())
-                secret_message = b"".join([hmac_message, encrypted_message])
-                # # attach header to message
-                # secret_message = f"{len(secret_message):<{HEADERSIZE}}" + secret_message
-                # send message
-                client_socket.send(secret_message)
-    server_socket.close()
-
-# client socket works in a very similar way to server socket with the exception of the initial connection
-def client():
-    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client_socket.connect((hostname, portNumber))
-
-    while True:
-        socket_list = [sys.stdin, client_socket]
-        try:
-            read, write, error = select.select(socket_list, [], [])
-        except KeyboardInterrupt as error:
-            sys.exit(0)
-        for sock in read:
-            if sock == client_socket:
-                # message = ""
-                # newMessage = True
-                while True:
-                    msg = client_socket.recv(1024)
-                    if msg is not None and msg != b'':
-                        recv_hmac = msg[:32]
-                        recv_encrypted_msg = msg[32:]
-                        if recv_hmac == create_hmac(recv_encrypted_msg, authkey.encode()):
-                            recv_decrypted_msg = decrypt_message(msg[32:], confkey.encode())
-                            print(recv_decrypted_msg.decode())
-                            break
-                        else:
-                            print("message has been tampered with")
-                            sys.exit(0)
-                    else:
-                        sys.exit(0)
-                    # if newMessage:
-                    #     try:
-                    #         length = int(msg[:HEADERSIZE])
-                    #     except ValueError as error:
-                    #         sys.exit(0)
-                    #     newMessage = False
-                    # message += msg.decode("utf-8")
-                    # if len(message) - HEADERSIZE == length:
-                    #     print(message[HEADERSIZE:])
-                    #     newMessage = True
-                    #     message = ""
-                    #     break
-            else:
-                try:
-                    msg = input()
-                except EOFError as error:
-                    sys.exit(0)
-                # encrypt message and generate auth msg
-                encrypted_message = encrypt_message(msg.encode(), confkey.encode())
-                hmac_message = create_hmac(encrypted_message, authkey.encode())
-                secret_message = b"".join([hmac_message, encrypted_message])
-                # # attach header to message
-                # secret_message = f"{len(secret_message):<{HEADERSIZE}}" + secret_message
-                # send message
-                client_socket.send(secret_message)
-    client_socket.close()
-
 def main():
-    init()
+  global s
+  datalen=64
+  
+  init()
+  
+  inputs = [sys.stdin, s]
+  outputs = [s]
+
+  output_buffer = deque()
+
+  while s is not None: 
+    #Prevents select from returning the writeable socket when there's nothing to write
+    if (len(output_buffer) > 0):
+      outputs = [s]
+    else:
+      outputs = []
+
+    readable, writeable, exceptional = select.select(inputs, outputs, inputs)
+
+    if s in readable:
+      data = s.recv(datalen)
+      #print "received packet, length "+str(len(data))
+
+      if ((data is not None) and (len(data) > 0)):
+            recv_hmac = data[:32]
+            recv_encrypted_msg = data[32:]
+            if recv_hmac == create_hmac(recv_encrypted_msg, authkey.encode()):
+                recv_decrypted_msg = decrypt_message(data[32:], confkey.encode())
+                sys.stdout.write(recv_decrypted_msg.decode())
+            else:
+                print("message has been tampered with")
+                sys.exit(0)
+      else:
+        #Socket was closed remotely
+        s.close()
+        s = None
+
+    if sys.stdin in readable:
+      data = sys.stdin.readline(1024)
+      if(len(data) > 0):
+        output_buffer.append(data)
+      else:
+        #EOF encountered, close if the local socket output buffer is empty.
+        if( len(output_buffer) == 0):
+          s.shutdown(socket.SHUT_RDWR)
+          s.close()
+          s = None
+
+    if s in writeable:
+      if (len(output_buffer) > 0):
+        data = output_buffer.popleft()
+        encrypted_message = encrypt_message(data.encode(), confkey.encode())
+        hmac_message = create_hmac(encrypted_message, authkey.encode())
+        secret_message = b"".join([hmac_message, encrypted_message])
+        bytesSent = s.send(secret_message)
+        #If not all the characters were sent, put the unsent characters back in the buffer
+        if(bytesSent < len(data)):
+          output_buffer.appendleft(data[bytesSent:])
+
+    if s in exceptional:
+      s.shutdown(socket.SHUT_RDWR)
+      s.close()
+      s = None
+
+###########
 
 if __name__ == "__main__":
-    main()
+  main()
