@@ -11,6 +11,8 @@ HEADERSIZE = 256
 
 portNumber = 9999
 hostname = ""
+confkey = ""
+authkey = ""
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
@@ -25,6 +27,12 @@ def init():
     args = parse_arguments()
     global portNumber
     global hostname
+    global confkey
+    global authkey
+    if args.conf is None or args.auth is None:
+        sys.exit()
+    confkey = args.conf
+    authkey = args.auth
     if args.connect is not None:     
         portNumber = args.port
         hostname = args.connect
@@ -33,7 +41,7 @@ def init():
         portNumber = args.port
         server()
 
-def generage_iv():
+def generate_iv():
     rnd = Crypto.Random.get_random_bytes(16)
     return rnd
 
@@ -48,13 +56,24 @@ def add_pad(msg):
 def remove_pad(msg):
     return msg.rstrip(b"\0")
 
-def encrypt_message(msg, key, iv):
-    encryptor = AES.new(key, AES.MODE_CBC, iv)
-    return iv + encryptor.encrypt(msg)
+def encrypt_message(msg, key):
+    iv = generate_iv()
+    padded_message = add_pad(msg)
+    hashed_key = hash_key(key).digest()
+    encryptor = AES.new(hashed_key, AES.MODE_CBC, iv)
+    return iv + encryptor.encrypt(padded_message)
+
+def decrypt_message(encrypted_msg, key):
+    iv = encrypted_msg[:16]
+    hashed_key = hash_key(key).digest()
+    decryptor = AES.new(hashed_key, AES.MODE_CBC, iv)
+    padded_message = decryptor.decrypt(encrypted_msg[16:])
+    plaintext_message = remove_pad(padded_message)
+    return plaintext_message
 
 def create_hmac(encrypted_message, key):
     auth_msg = hmac.new(key, encrypted_message, hashlib.sha256)
-    return auth_msg
+    return auth_msg.digest()
 
 def server():
     # create socket
@@ -79,26 +98,38 @@ def server():
         for sock in read:
             # recieve message
             if sock == client_socket:
-                message = ""
-                newMessage = True
+                # message = ""
+                # newMessage = True
                 while True:
-                    msg = client_socket.recv(512)
-                    # new message determine the length from the header
-                    if newMessage:
-                        try:
-                            length = int(msg[:HEADERSIZE])
-                        except ValueError as error:
+                    msg = client_socket.recv(1024)
+                    if msg is not None and msg != b'':
+                        recv_hmac = msg[:32]
+                        recv_encrypted_msg = msg[32:]
+                        if recv_hmac == create_hmac(recv_encrypted_msg, authkey.encode()):
+                            recv_decrypted_msg = decrypt_message(msg[32:], confkey.encode())
+                            print(recv_decrypted_msg.decode())
+                            break
+                        else:
+                            print("message has been tampered with")
                             sys.exit(0)
-                        newMessage = False
-                    # append message to needed for large messages
-                    message += msg.decode("utf-8")
-                    # print message once the entire message has been recieved
-                    if len(message) - HEADERSIZE == length:
-                        print(message[HEADERSIZE:])
-                        # reset values and break loop
-                        newMessage = True
-                        message = ""
-                        break
+                    else:
+                        sys.exit(0)
+                    # # new message determine the length from the header
+                    # if newMessage:
+                    #     try:
+                    #         length = int(msg[:HEADERSIZE])
+                    #     except ValueError as error:
+                    #         sys.exit(0)
+                    #     newMessage = False
+                    # # append message to needed for large messages
+                    # message += msg.decode("utf-8")
+                    # # print message once the entire message has been recieved
+                    # if len(message) - HEADERSIZE == length:
+                    #     print(message[HEADERSIZE:])
+                    #     # reset values and break loop
+                    #     newMessage = True
+                    #     message = ""
+                    #     break
             # send message
             else:
                 # read from standard input
@@ -106,10 +137,14 @@ def server():
                     msg = input()
                 except EOFError as error:
                     sys.exit(0)
-                # attach header to message
-                msg = f"{len(msg):<{HEADERSIZE}}" + msg
+                # encrypt message and generate auth msg
+                encrypted_message = encrypt_message(msg.encode(), confkey.encode())
+                hmac_message = create_hmac(encrypted_message, authkey.encode())
+                secret_message = b"".join([hmac_message, encrypted_message])
+                # # attach header to message
+                # secret_message = f"{len(secret_message):<{HEADERSIZE}}" + secret_message
                 # send message
-                client_socket.send(bytes(msg, "utf-8"))
+                client_socket.send(secret_message)
     server_socket.close()
 
 # client socket works in a very similar way to server socket with the exception of the initial connection
@@ -125,45 +160,50 @@ def client():
             sys.exit(0)
         for sock in read:
             if sock == client_socket:
-                message = ""
-                newMessage = True
+                # message = ""
+                # newMessage = True
                 while True:
-                    msg = client_socket.recv(512)
-                    if newMessage:
-                        try:
-                            length = int(msg[:HEADERSIZE])
-                        except ValueError as error:
+                    msg = client_socket.recv(1024)
+                    if msg is not None and msg != b'':
+                        recv_hmac = msg[:32]
+                        recv_encrypted_msg = msg[32:]
+                        if recv_hmac == create_hmac(recv_encrypted_msg, authkey.encode()):
+                            recv_decrypted_msg = decrypt_message(msg[32:], confkey.encode())
+                            print(recv_decrypted_msg.decode())
+                            break
+                        else:
+                            print("message has been tampered with")
                             sys.exit(0)
-                        newMessage = False
-                    message += msg.decode("utf-8")
-                    if len(message) - HEADERSIZE == length:
-                        print(message[HEADERSIZE:])
-                        newMessage = True
-                        message = ""
-                        break
+                    else:
+                        sys.exit(0)
+                    # if newMessage:
+                    #     try:
+                    #         length = int(msg[:HEADERSIZE])
+                    #     except ValueError as error:
+                    #         sys.exit(0)
+                    #     newMessage = False
+                    # message += msg.decode("utf-8")
+                    # if len(message) - HEADERSIZE == length:
+                    #     print(message[HEADERSIZE:])
+                    #     newMessage = True
+                    #     message = ""
+                    #     break
             else:
                 try:
                     msg = input()
                 except EOFError as error:
                     sys.exit(0)
-                msg = f"{len(msg):<{HEADERSIZE}}" + msg
-                client_socket.send(bytes(msg, "utf-8"))
+                # encrypt message and generate auth msg
+                encrypted_message = encrypt_message(msg.encode(), confkey.encode())
+                hmac_message = create_hmac(encrypted_message, authkey.encode())
+                secret_message = b"".join([hmac_message, encrypted_message])
+                # # attach header to message
+                # secret_message = f"{len(secret_message):<{HEADERSIZE}}" + secret_message
+                # send message
+                client_socket.send(secret_message)
     client_socket.close()
 
 def main():
-    IV = generage_iv()
-    key1 = hash_key("this is a key".encode())
-    key2 = hash_key("fnlsdhfsldkfjlksdjflklililililililililililililillifjwhliffsdfsjdfn".encode())
-    print(len(key1.hexdigest()))
-    print(len(key2.hexdigest()))
-    msg = add_pad("hello world".encode())
-    print(msg)
-    print(remove_pad(msg))
-    secret_message = add_pad("secret message".encode())
-    encrypted_message = encrypt_message(secret_message, key1.digest(), IV)
-    print(f"encrypted message: {encrypted_message}")
-    auth_msg = create_hmac(encrypted_message, "this is my auth key".encode())
-    print(f"authentication message: {auth_msg.digest()}")
     init()
 
 if __name__ == "__main__":
