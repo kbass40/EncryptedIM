@@ -35,7 +35,7 @@ def parse_arguments():
         help = 'Host to connect to')
     parser.add_argument('-s', dest='server', action='store_true',
         help = 'Run as server (on port 9999)')
-    parser.add_argument('-p', dest='port', metavar='PORT', type=int, 
+    parser.add_argument(dest='port', metavar='PORT', nargs = '?', type=int, 
         default = DEFAULT_PORT,
         help = 'For testing purposes - allows use of different port')
     parser.add_argument('-confkey', dest = 'conf', type = str)
@@ -176,10 +176,15 @@ def main():
             recv_encrypted_msg = data[32:]
             if recv_hmac == create_hmac(recv_encrypted_msg, authkey.encode()):
                 recv_decrypted_msg = decrypt_message(data[32:], confkey.encode())
-                sys.stdout.write(recv_decrypted_msg.decode())
+                try:
+                    decoded_message = recv_decrypted_msg.decode()
+                except UnicodeDecodeError as error:
+                    print("conf keys do not match")
+                    quit()
+                sys.stdout.write(decoded_message)
             else:
-                print("message has been tampered with")
-                sys.exit(0)
+                print("auth keys do not match or message has been tampered with")
+                quit()
       else:
         #Socket was closed remotely
         s.close()
